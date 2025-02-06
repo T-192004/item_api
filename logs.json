@@ -1,0 +1,66 @@
+{
+  "id": 1,
+  "timestamp": "2025-02-06 10:54:39",
+  "name": "item1",
+  "description": "this is the first item"
+}
+{
+  "id": 2,
+  "timestamp": "2025-02-06 10:55:32",
+  "name": "Laptop",
+  "description": "A high-performance laptop with 16GB RAM, 512GB SSD, and an Intel Core i7 processor."
+}
+{
+  "id": 3,
+  "timestamp": "2025-02-06 10:55:40",
+  "name": "Smartphone",
+  "description": "A 5G-enabled smartphone with a 48MP camera, 128GB storage, and a sleek design."
+}
+{
+  "id": 4,
+  "timestamp": "2025-02-06 10:55:48",
+  "name": "Wireless Headphones",
+  "description": "Noise-cancelling wireless headphones with 30 hours of battery life and premium sound quality."
+}
+{
+  "id": 5,
+  "timestamp": "2025-02-06 10:55:57",
+  "name": "Coffee Maker",
+  "description": "A programmable coffee maker with a 12-cup capacity and customizable brew strength."
+}
+{
+  "id": 6,
+  "timestamp": "2025-02-06 10:56:06",
+  "name": "Smartwatch",
+  "description": "A smartwatch with fitness tracking, heart rate monitoring, and notifications from your smartphone."
+}
+{
+  "id": 7,
+  "timestamp": "2025-02-06 10:56:14",
+  "name": "Bluetooth Speaker",
+  "description": "Portable Bluetooth speaker with IPX7 waterproofing and 360-degree sound."
+}
+{
+  "id": 8,
+  "timestamp": "2025-02-06 10:56:22",
+  "name": "Gaming Console",
+  "description": "Next-gen gaming console with 4K resolution, ultra-fast loading times, and a wide range of games."
+}
+{
+  "id": 9,
+  "timestamp": "2025-02-06 10:56:31",
+  "name": "Wireless Mouse",
+  "description": "Ergonomic wireless mouse with adjustable DPI and a long battery life."
+}
+{
+  "id": 10,
+  "timestamp": "2025-02-06 10:56:39",
+  "name": "Electric Kettle",
+  "description": "Electric kettle with quick boiling time and an automatic shut-off feature for safety."
+}
+{
+  "id": 11,
+  "timestamp": "2025-02-06 10:56:46",
+  "name": "Air Purifier",
+  "description": "HEPA air purifier with three filtration stages and a quiet operation mode."
+}
