@@ -3,11 +3,12 @@ const express = require('express');
 const mysql = require('mysql2');
 const fs = require('fs').promises;
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt'); // For hashing passwords to securely store them
+const bcrypt = require('bcryptjs'); // Switched to bcryptjs to avoid native binding issues
 const app = express();
 
 // Middleware for parsing incoming JSON data
 app.use(express.json());
+
 // MySQL Database connection setup
 const connection = mysql.createConnection({
   host: process.env.DB_HOST, // Render MySQL host
@@ -16,7 +17,11 @@ const connection = mysql.createConnection({
   database: process.env.DB_NAME, // Database name
 });
 
-
+// Check if necessary environment variables are missing
+if (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME) {
+  console.error('Missing required environment variables.');
+  process.exit(1); // Stop the server if DB credentials are missing
+}
 
 // Test the connection to the MySQL database
 connection.connect(err => {
@@ -61,6 +66,10 @@ app.use(rateLimiter); // Apply rate limiting middleware globally
 app.post('/register', async (req, res) => {
   const { username, password, email } = req.body;
 
+  if (!username || !password || !email) {
+    return res.status(400).json({ error: 'Please provide all required fields: username, password, and email.' });
+  }
+
   // Hash the password before saving it in the database for security
   const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -78,6 +87,10 @@ app.post('/register', async (req, res) => {
 // User Login Route with JWT Authentication
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Please provide both username and password.' });
+  }
 
   // SQL query to find the user by username
   const query = 'SELECT * FROM users WHERE username = ?';
@@ -118,7 +131,6 @@ function verifyToken(req, res, next) {
 app.use('/api/items', verifyToken); // Protect /api/items routes with JWT verification
 
 // CRUD Routes for managing Items
-
 // Get all items from the database
 app.get('/api/items', (req, res) => {
   connection.query('SELECT * FROM items', (err, results) => {
