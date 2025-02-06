@@ -35,7 +35,7 @@ Make sure you have the following installed:
 
 1. Clone the repository:
    ```sh
-   git clone https://github.com/your-username/your-repo.git
+   git clone https://github.com/T-192004/item-sss-crud-api
    cd your-repo
    ```
 2. Install dependencies:
