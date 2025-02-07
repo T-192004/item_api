@@ -1,212 +1,169 @@
 require('dotenv').config();
 const express = require('express');
-const mysql = require('mysql2');
+const { Pool } = require('pg'); // Using PostgreSQL
 const fs = require('fs').promises;
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs'); // Switched to bcryptjs to avoid native binding issues
+const bcrypt = require('bcryptjs');
 const app = express();
 
-// Middleware for parsing incoming JSON data
-app.use(express.json());
+app.use(express.json()); // Middleware for JSON parsing
 
-// MySQL Database connection setup
-const connection = mysql.createConnection({
-  host: process.env.DB_HOST, // Render MySQL host
-  user: process.env.DB_USER, // Database username
-  password: process.env.DB_PASSWORD, // Database password
-  database: process.env.DB_NAME, // Database name
+// PostgreSQL Database connection setup using Render's DATABASE_URL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // Required for Render-hosted PostgreSQL
 });
 
-// Check if necessary environment variables are missing
-if (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME) {
-  console.error('Missing required environment variables.');
-  process.exit(1); // Stop the server if DB credentials are missing
-}
+// Test the connection to PostgreSQL
+pool.connect()
+  .then(() => console.log('Connected to PostgreSQL database'))
+  .catch(err => console.error('Database connection error:', err));
 
-// Test the connection to the MySQL database
-connection.connect(err => {
-  if (err) {
-    console.error('Error connecting to the database: ', err);
-    return;
+// Function to create tables if they don't exist
+const createTables = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS items (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255),
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("✅ Tables ensured to exist");
+  } catch (error) {
+    console.error("❌ Error creating tables:", error);
   }
-  console.log('Connected to the database');
-});
+};
+createTables(); // Ensure tables exist on startup
 
-// Rate Limiting Middleware: Limits requests per IP address
+// Rate Limiting Middleware
 const rateLimit = {};
 const RATE_LIMIT = 100; // Max allowed requests per IP
-const WINDOW_MS = 15 * 60 * 1000; // 15-minute window for rate limiting
+const WINDOW_MS = 15 * 60 * 1000; // 15-minute window
 
 function rateLimiter(req, res, next) {
-  const ip = req.ip; // Get the user's IP address
+  const ip = req.ip;
   if (!rateLimit[ip]) {
-    rateLimit[ip] = { count: 0, timestamp: Date.now() }; // Initialize IP counter
+    rateLimit[ip] = { count: 0, timestamp: Date.now() };
   }
-
-  const timeElapsed = Date.now() - rateLimit[ip].timestamp; // Calculate time difference
+  const timeElapsed = Date.now() - rateLimit[ip].timestamp;
   if (timeElapsed > WINDOW_MS) {
-    rateLimit[ip] = { count: 1, timestamp: Date.now() }; // Reset the counter after 15 minutes
+    rateLimit[ip] = { count: 1, timestamp: Date.now() };
     return next();
   }
-
-  // Allow next request if under the rate limit
   if (rateLimit[ip].count < RATE_LIMIT) {
     rateLimit[ip].count++;
     return next();
   }
-
-  // If the limit is exceeded, inform the user with a retry time
-  const retryTime = Math.ceil((WINDOW_MS - timeElapsed) / 60000); 
-  res.status(429).json({ message: `Rate limit exceeded, try again in ${retryTime} minutes.` });
+  res.status(429).json({ message: 'Rate limit exceeded, try again later.' });
 }
+app.use(rateLimiter);
 
-app.use(rateLimiter); // Apply rate limiting middleware globally
-
-// User Registration Route
+// User Registration
 app.post('/register', async (req, res) => {
   const { username, password, email } = req.body;
-
   if (!username || !password || !email) {
-    return res.status(400).json({ error: 'Please provide all required fields: username, password, and email.' });
+    return res.status(400).json({ error: 'All fields are required' });
   }
-
-  // Hash the password before saving it in the database for security
   const hashedPassword = await bcrypt.hash(password, 10);
-
-  // SQL query to insert a new user into the users table
-  const query = 'INSERT INTO users (username, password, email) VALUES (?, ?, ?)';
-
-  connection.query(query, [username, hashedPassword, email], (err, result) => {
-    if (err) {
-      return res.status(500).json({ error: 'Failed to register user' }); // Handle errors
-    }
-    res.status(201).json({ message: 'User registered successfully' }); // Success message
-  });
-});
-
-// User Login Route with JWT Authentication
-app.post('/login', (req, res) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Please provide both username and password.' });
+  try {
+    await pool.query('INSERT INTO users (username, password, email) VALUES ($1, $2, $3)',
+      [username, hashedPassword, email]);
+    res.status(201).json({ message: 'User registered successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error registering user' });
   }
-
-  // SQL query to find the user by username
-  const query = 'SELECT * FROM users WHERE username = ?';
-  
-  connection.query(query, [username], async (err, results) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-
-    if (results.length === 0) {
-      return res.status(401).json({ message: 'Unauthorized: User not found' }); // User not found
-    }
-
-    const user = results[0];
-
-    // Compare provided password with the stored hashed password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: 'Unauthorized: Incorrect password' }); // Incorrect password
-    }
-
-    // Generate JWT token if login is successful
-    const token = jwt.sign({ userId: user.id }, 'token', { expiresIn: '52h' }); // Token expires in 52 hours
-    return res.json({ token }); // Return the generated token
-  });
 });
 
-// Middleware to verify JWT token
-function verifyToken(req, res, next) {
-  const token = req.headers['authorization']?.split(' ')[1]; // Get token from the Authorization header
-  if (!token) return res.status(403).json({ message: 'No token provided' });
+// User Login
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    if (result.rows.length === 0) return res.status(401).json({ error: 'User not found' });
+    const user = result.rows[0];
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
+    const token = jwt.sign({ userId: user.id }, 'token', { expiresIn: '52h' });
+    res.json({ token });
+  } catch (error) {
+    res.status(500).json({ error: 'Login error' });
+  }
+});
 
+// Middleware to verify JWT
+function verifyToken(req, res, next) {
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) return res.status(403).json({ message: 'No token provided' });
   jwt.verify(token, 'token', (err, decoded) => {
-    if (err) return res.status(500).json({ message: 'Failed to authenticate token' });
-    req.userId = decoded.userId; // Save user ID to request object
-    next(); // Proceed to the next middleware
+    if (err) return res.status(500).json({ message: 'Token authentication failed' });
+    req.userId = decoded.userId;
+    next();
   });
 }
+app.use('/api/items', verifyToken);
 
-app.use('/api/items', verifyToken); // Protect /api/items routes with JWT verification
-
-// CRUD Routes for managing Items
-// Get all items from the database
-app.get('/api/items', (req, res) => {
-  connection.query('SELECT * FROM items', (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results); // Return all items
-  });
+// CRUD Operations for Items
+app.get('/api/items', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM items');
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
-// Get a specific item by ID
-app.get('/api/items/:id', (req, res) => {
-  const { id } = req.params;
-  connection.query('SELECT * FROM items WHERE id = ?', [id], (err, results) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-    if (results.length === 0) return res.status(404).json({ error: 'Item not found' });
-    res.json(results[0]); // Return the item
-  });
-});
-
-// Create a new item
 app.post('/api/items', async (req, res) => {
   const { name, description } = req.body;
-  
-  // Convert the current timestamp to MySQL-compatible format
-  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19); // Remove 'T' and 'Z'
-  
-  const newItem = { name, description, created_at: timestamp };
-
-  connection.query('INSERT INTO items SET ?', newItem, async (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-
-    // Log the creation of a new item
-    const logEntry = {
-      id: result.insertId,
-      timestamp,
-      name,
-      description
-    };
-
-    try {
-      // Append item creation log to logs.json file
-      await fs.appendFile('logs.json', JSON.stringify(logEntry, null, 2) + '\n');
-      res.status(201).json(newItem); // Respond with the new item
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to log data' });
-    }
-  });
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  try {
+    const result = await pool.query(
+      'INSERT INTO items (name, description, created_at) VALUES ($1, $2, $3) RETURNING *',
+      [name, description, timestamp]
+    );
+    await fs.appendFile('logs.json', JSON.stringify(result.rows[0], null, 2) + '\n');
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Error creating item' });
+  }
 });
 
-// Update an existing item
-app.put('/api/items/:id', (req, res) => {
+app.put('/api/items/:id', async (req, res) => {
   const { id } = req.params;
   const { name, description } = req.body;
-
-  connection.query(
-    'UPDATE items SET name = ?, description = ? WHERE id = ?',
-    [name, description, id],
-    (err, result) => {
-      if (err) return res.status(500).json({ error: 'Database error' });
-      if (result.affectedRows === 0) return res.status(404).json({ error: 'Item not found' });
-      res.json({ message: 'Item updated successfully' });
-    }
-  );
+  try {
+    const result = await pool.query(
+      'UPDATE items SET name = $1, description = $2 WHERE id = $3 RETURNING *',
+      [name, description, id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Item not found' });
+    res.json({ message: 'Item updated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
-// Delete an item by ID
-app.delete('/api/items/:id', (req, res) => {
+app.delete('/api/items/:id', async (req, res) => {
   const { id } = req.params;
-
-  connection.query('DELETE FROM items WHERE id = ?', [id], (err, result) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Item not found' });
+  try {
+    const result = await pool.query('DELETE FROM items WHERE id = $1', [id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Item not found' });
     res.json({ message: 'Item deleted successfully' });
-  });
+  } catch (error) {
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
-// Start the server on port 5000
+// Start the server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
