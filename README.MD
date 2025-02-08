@@ -25,8 +25,8 @@ This project is a RESTful API built using **Node.js**, **Express**, and **Postgr
 ## Installation & Setup
 ### 1. Clone the repository:
 ```sh
-git clone https://github.com/yourusername/your-repo.git
-cd your-repo
+git clone https://github.com/T-192004/item_api
+cd item_api
 ```
 
 ### 2. Install dependencies:
